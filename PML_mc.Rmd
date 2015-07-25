@@ -1,0 +1,93 @@
+---
+title: "Practical Machine Learning, Course Project"
+author: "Monika"
+output: html_document
+---
+
+# Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. I could use any of the other variables to predict with. The following is the report describing how I built your model, how I used cross validation, what I think the expected out of sample error is, and why I made the choices I did. I also used your prediction model to predict 20 different test cases. 
+
+
+# Data
+
+Data is downloaded into local files - there are two sets of data, the training set and the testing set. I will use the testing set to perform the predictions from the final model on. When manually checking the data I noticed '#DIV/0!' value in numeric data, which I transformed into NA values.
+
+```{r}
+library(caret, quietly=TRUE)
+#download.file(url = 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', 
+#               destfile = 'train.csv')
+#download.file(url = 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv', 
+#               destfile = 'test.csv')
+train <- read.csv(file = 'train.csv', na.strings = c('NA','#DIV/0!',''))
+test <- read.csv(file = 'test.csv', na.strings = c('NA','#DIV/0!',''))
+```
+
+During exploratory data analysis I noticed that the first 7 columns of the data are dimensional, and may not be pertinent to the prediction model. The balance of the fields are numeric according to the data documentation available here: http://groupware.les.inf.puc-rio.br/har. The balance of the columns are looped through and cast into numeric data with the exception of the last column, which is the categorical class the prediction model will classify for. I perform the same procedure on training and testing data.
+
+```{r}
+for(i in c(8:ncol(train)-1)) {
+  train[,i] = as.numeric(as.character(train[,i]))
+  test[,i] = as.numeric(as.character(test[,i]))
+}
+```
+
+Analysis also revealed that several of the many variables are very sparse and thus may not be as useful for building a classification model. The following code initiates a slicer index of column names without the columns with NA values and also removes the inital seven columns of dimensional data. Rather than modify the actual data, this vector of column names will be used as a slicer index into the training data, cross-validation data, and the testing data when interacting with a model.
+
+```{r}
+feature_index <- colnames(train[colSums(is.na(train)) == 0])
+feature_index <- feature_index[-c(1:7)]
+```
+
+# Cross-Validation
+
+The training data will be splitted into subtraining (75%) and subtesting (25%) sample. We need this for cross-validation to improve accuracy and minimize out of sample error. I included only the columns that are determined with feature index.
+
+```{r}
+set.seed(42)
+index_train <- createDataPartition(y=train$classe, p=0.70, list=FALSE)
+train1 <- train[index_train,feature_index]
+test1 <- train[-index_train,feature_index]
+dim(train1); dim(test1)
+```
+
+# Pre-Model Fitting
+
+Before a model is fit it is useful to have an idea of the ratio that should be expected of the classification variable outcome. This wil govern how we seek to optimize models for specificity, sensitivity, and positive/negative predictive value.
+
+```{r}
+library(ggplot2)
+qplot(train1$classe, geom="histogram", main = "Histogram for classe in training data", 
+      xlab = "Classe value", ylab = 'Frequency in training data',
+      fill=I("blue"), alpha=I(.4))
+```
+
+This histogram shows that each of the classifications is within an order of magnitude of any other with each class roughly as likely as any other. This indicates that optimizing a model for accuracy and minimizing overall out of sample error should indicate an optimal model for making classificions.
+
+I selected a random forest from the preliminary analysis. For each candidate model, predictions are made agaist the cross-validation data set. Then, a confusion matrix is calculated and stored for each model for later reference.
+
+```{r, message=FALSE}
+model <- train(classe ~ ., data = train1, method = 'rf', 
+                trControl = trainControl(method = "cv", 
+                                         number = 4, 
+                                         allowParallel = TRUE, 
+                                         verboseIter = TRUE))
+prediction <- predict(model, test1)
+cm <- confusionMatrix(prediction, test1$classe)
+cm
+```
+
+The Random Forest model appears to be the most accurate which can one see from the confusion matrix. There are only 35 falsely predicted elements, the accuracy is 99.41%, and out of sample error is 0.0049 (equal to 1-accuracy).
+
+
+# Predicting on test data
+For the test results there are 20 samples asked to be classified. The column names are not consistent between the test and training data. It is necessary to rename the last column in the testing set for compatability. However, since that column will not be used in the model feature set being fed into the predictor the column name change unaffects the predictions. Once the predictions are made from the selected random forest model the prediction vector is shown.
+
+```{r}
+final_cols <- length(colnames(test[]))
+colnames(test)[final_cols] <- 'classe'
+quiz <- predict(model, test[,feature_index])
+quiz
+```
